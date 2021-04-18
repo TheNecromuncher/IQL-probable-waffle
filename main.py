@@ -1,26 +1,74 @@
 import numpy as np
-from game2dboard import Board
+import pygame as pg
+import random
 
-NUM_ROWS = 20
-NUM_COLS = 20
-GOAL_STATE = [0, NUM_COLS - 1]
-START_STATE = [NUM_ROWS - 1, 0]
+# GLOBAL ZONE
+# colors:
+GREY = (160, 160, 160)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+# size of grid:
+NUM_ROWS = 300
+NUM_COLS = 300
+top_x, top_y = 0, 0
+container_size = 1048
+# goal and start:
+GOAL_STATE = (0, NUM_COLS - 1)
+START_STATE = (NUM_ROWS - 1, 0)
+# pygame setup:
+pg.display.set_caption("IQL Algorithm")
+pg.init()
+pg.font.init()
+sys_fonts = pg.font.get_fonts()
+font1 = pg.font.SysFont(name=sys_fonts[0], size=22, bold=True, italic=False)
+font2 = pg.font.SysFont(name=sys_fonts[0], size=12, bold=False, italic=False)
+font3 = pg.font.SysFont(name=sys_fonts[0], size=12, bold=False, italic=True)
+font4 = pg.font.SysFont(name=sys_fonts[0], size=30, bold=False, italic=False)
+random.seed()
+pg_user_keys = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+WIN = pg.display.set_mode(size=(int(1600), int(1050)))
+WIN.fill(WHITE)
+CELL_SIZE = 3
+size = 100
+# current/previous states for methods to interact with (only stores co_ords):
+CURRENT_STATE = [START_STATE[0], START_STATE[1]]
+PREVIOUS_STATE = CURRENT_STATE
+# viable actions list:
+ACTIONS = ["right", "up", "left", "down"]
 
-obstacle_states = [(5, 5), (2, 3), (2, 1), (2, 2), (2, 3)]
-ACTIONS = [0, 1, 2, 3]
 
-'''
-for x in range(NUM_ROWS):
-    for y in range(NUM_COLS):
-        print(q_table[x][y])
-'''
+def random_action():
+    return ACTIONS[random.randint(0, 3)]
 
 
-def state_reward(state):
-    if state == GOAL_STATE:
-        return 0
-    else:
-        return -1
+# action = None indicates unvisited
+class State:
+    def __init__(self, Q, Action=None, Obstacle=False, Lock=False):
+        self.Q = Q
+        self.Action = Action
+        self.Lock = Lock
+        self.Obstacle = Obstacle
+
+
+# discount factor! will be changeable by user later
+DISCOUNT_FACTOR = 0.95
+
+# sets up q-table
+q_table = [[None] * NUM_COLS for _ in range(NUM_ROWS)]
+for row in range(len(q_table)):
+    for entry in range(len(q_table)):
+        q_table[row][entry] = State(0)
+
+# changes goal state to be high reward and locked
+q_table[GOAL_STATE[0]][GOAL_STATE[1]] = State(100, Lock=True)
+
+# adds in obstacles
+obstacle_states = [(5, 5), (2, 3), (2, 1), (2, 2), (5, 4)]
+for obstacle in obstacle_states:
+    q_table[obstacle[0]][obstacle[1]].Obstacle = True
+
+
+# Ready to roll! time to call main...
 
 
 def manhattan_distance(A, B):
@@ -28,112 +76,158 @@ def manhattan_distance(A, B):
 
 
 # both takes the action and verifies it is both within grid bounds and does not enter into an obstacle
-def take_action(state, action):
-    if action == 0:
-        # right
-        next_state = (state[0] + 1, state[1])
-    elif action == 1:
-        # down
-        next_state = (state[0], state[1] - 1)
-    elif action == 2:
-        # left
-        next_state = (state[0] - 1, state[1])
-    elif action == 3:
-        # up
-        next_state = (state[0], state[1] + 1)
+def test_action(co_ords, action):
+    y = co_ords[0]
+    x = co_ords[1]
+    if action == "down":
+        y += 1
+    elif action == "left":
+        x -= 1
+    elif action == "up":
+        y -= 1
+    elif action == "right":
+        x += 1
     else:
-        print("this is not good this is not good")
-        raise Exception("HE'S TRYING TO ESCAPE CALL THE COAST GUARD")
+        raise Exception("that is not an action what's going on")
     # verifies action is allowed, i.e. not off of grid or into an obstacle
-    if (next_state[0] >= 0) and (next_state[0] <= NUM_ROWS - 1):
-        if (next_state[1] >= 0) and (next_state[1] <= NUM_COLS - 1):
-            if next_state not in obstacle_states:
-                return next_state
-    return state
+    if x < 0 or x > NUM_COLS:
+        return None
+    elif y < 0 or y > NUM_ROWS:
+        return None
+    elif q_table[y][x].Obstacle is True:
+        return None
+    else:
+        # returns y, x coordinates
+        return y, x
 
 
 # chooses action that results in minimal manhattan distance from goal, preferring actions that involve no turns
-# as described in paper
-def calc_best_action(state, previous_state):
-    resulting_states = []
-    # take every possible action
+# as described in paper. returns ["action", (y, x), distance]
+def perform_action():
+    options = []
     for action in ACTIONS:
-        resulting_states.append([state, action, take_action(state, action)])
-        if resulting_states[-1][0] == resulting_states[-1][2]:
-            resulting_states.pop(-1)
-    # check each resulting state's distance to goal
-    for i in range(len(resulting_states)):
-        # resulting_states[a][b]; a = state, b = distance to goal
-        resulting_states[i] = [*resulting_states[i], manhattan_distance(resulting_states[i][2], GOAL_STATE)]
-    # sort by distance to goal (by highest distance)
-    resulting_states.sort(key=lambda x: x[3])
-    #
-    # resulting_states[i] = [STATE, ACTION, RESULTING STATE, DISTANCE TO GOAL]
-    #
-    # check if theres a tie for first
-    if resulting_states[0][3] == resulting_states[1][3]:
-        # if the first one checked has no turns, pick it
-        if previous_state[0] == state[0] and state[0] == resulting_states[0][2][0]:
-            return resulting_states[0][1]
-        elif previous_state[1] == state[1] and state[1] == resulting_states[0][2][1]:
-            return resulting_states[0][1]
-        else:
-            # the first one had turns, so pick the 2nd one
-            # (if they both had turns then it's arbitrary, so this 2nd one is a safe pick regardless)
-            return resulting_states[0][1]
+        co_ords = test_action(CURRENT_STATE, action)
+        if co_ords is not None:
+            options.append([action, co_ords])
+    for option in options:
+        y = option[1][0]
+        x = option[1][1]
+        options[options.index(option)].append(manhattan_distance((y, x), GOAL_STATE))
+        if q_table[CURRENT_STATE[0]][CURRENT_STATE[1]].Lock:
+            return None
+        if q_table[y][x].Lock:
+            return None
+    # sorts by 3rd thing in the array, which is the manhattan distance
+    options.sort(key=lambda z: z[2])
+    # if theres nowhere to go, raise exception
+    if len(options) == 0:
+        raise Exception("Nowhere to go!!")
+    # if theres only one option, or if the first ones the best, pick it
+    elif len(options) == 1 or options[0][2] != options[1][2]:
+        current_state = options[0][1]
+        return options[0]
+    # otherwise, pick one that doesn't turn
+    elif options[0][1][0] == PREVIOUS_STATE[0] or options[0][1][1] == PREVIOUS_STATE[1]:
+        return options[0]
     else:
-        return resulting_states[0][1]
+        return options[1]
 
 
-def generate_q_table():
-    # In the IQL algorithm, oddly enough, since it is highly deterministic and almost every variable needed is given
-    # at the start, the q_table becomes a useful data structure to store the optimal decision at a given grid location,
-    # rather than as a complex data structure that is iterated upon to hone in on the optimal solution through a sort of
-    # reinforcement learning... not very much like q-learning if you ask me! but, definitely inspired by it!
-    #
-    # as a result, the q table need only store ONE q value for the BEST action at any given (x, y) location
-    # so, the size of the q table is [NUM_ROWS] + [NUM_COLS] = O(n), scales linearly as size increases, where a q_table
-    # normally scales in a manner like [NUM_ROWS + NUM COLS] + NUM_ACTIONS (one entry per action)
-    # which is going to be O(n^3) worst case or O(n^2) in a standard case considering it has to be iterated upon
-    # in an episodic, unlocked fashion and every entry in the q table is updated
-    q_table = np.random.uniform(low=-1, high=-1, size=[NUM_ROWS] + [NUM_COLS])
-    q_table[GOAL_STATE[0]][GOAL_STATE[1]] = 0
-    return q_table
+def write_words(string, location, font, alias_bool=True, color=(0, 0, 0)):
+    text = font.render(string, alias_bool, color)
+    text_rect = text.get_rect()
+    text_rect.center = ((top_x + container_size + location[0]),
+                        (top_y + container_size + location[1]))
+    WIN.blit(text, text_rect)
 
 
-def plan_actions(q_table):
-    current_state = START_STATE
-    previous_state = START_STATE
-    for x in range(NUM_ROWS):
-        for y in range(NUM_COLS):
-            q_table[x][y] = calc_best_action([y, x], previous_state)
-            previous_state = current_state
-            current_state = [y, x]
-    return q_table
+def print_UI(size, grid):
+    size -= 1
+    # draw grid outline
+    pg.draw.line(
+        WIN, BLACK, (top_x, top_y),
+        (container_size + top_x, top_y), 1)
+    pg.draw.line(
+        WIN, BLACK, (top_x, top_y + container_size),
+        (top_x + container_size, top_y + container_size), 1)
+    pg.draw.line(
+        WIN, BLACK, (top_x, top_y),
+        (top_x, top_y + container_size), 1)
+    pg.draw.line(
+        WIN, BLACK, (top_x + container_size, top_y),
+        (top_x + container_size, top_y + container_size), 1)
+    # figure out cell size; "size" is arg
+    CELL_SIZE = container_size / size
+
+    if grid:
+        # vertical divisions of grid
+        for x in range(size):
+            pg.draw.line(
+                WIN, BLACK, (top_x + (CELL_SIZE * x), top_y),
+                (top_x + (CELL_SIZE * x), (container_size + top_y)), 1)
+            # horizontal divisions of grid
+            pg.draw.line(
+                WIN, BLACK, (top_x, top_y + (CELL_SIZE * x)),
+                (top_x + container_size, top_y + (CELL_SIZE * x)), 1)
+
+
+def place_cell(x, y, color=BLACK):
+    x = top_x + CELL_SIZE * x
+    y = top_y + CELL_SIZE * y
+    cell_x = cell_y = (container_size/size)
+    pg.draw.rect(WIN, color, x, y, x2, y2)
 
 
 def main():
-    # INITIALIZATION PHASE
-    q_table = generate_q_table()
-    # PLANNING PHASE (PATHFINDING PHASE)
-    q_table = plan_actions(q_table)
-    print(q_table)
-    # TRAVEL PHASE (following the path & displaying result)
-    # first, generate board
-    display = Board(NUM_COLS, NUM_ROWS)
-    display.cell_size = 25
-    display.title = "IQL Algorithm"
-    display.cursor = None
-    display.margin = 10
-    display.grid_color = "blue"
-    display.margin_color = "green"
-    display.cell_color = "yellow"
+    size = 100
+    pg.display.update()
+    program = True
+    grid = True
+    obstacle_density = 1
+    print_UI(size, grid)
+    frame_rate = 60
+    frame_rate_store = []
+
+    while program:
+        clock = pg.time.Clock()
+
+        # BEGIN MAIN GAME LOOP, PROMPT FOR INPUT
+        run = True
+        while run:
+            clock.tick(frame_rate)
+            pg.display.update()
+            for event in pg.event.get():
+                if event.type == pg.QUIT:
+                    pg.quit()
+                    program = False
+                    run = False
+                if event.type == pg.KEYDOWN:
+                    if event.key == pg.K_a:
+                        size = 100
+                    if event.key == pg.K_b:
+                        size = 200
+                    if event.key == pg.K_c:
+                        size = 300
+                    if event.key == pg.K_q:
+                        obstacle_density = 1
+                    if event.key == pg.K_w:
+                        obstacle_density = 2
+                    if event.key == pg.K_e:
+                        obstacle_density = 3
+                    if event.key == pg.K_g:
+                        if not grid:
+                            grid = True
+                        else:
+                            grid = False
+                    if event.key == pg.K_f:
+                        pass
+                    if event.key == pg.K_SPACE:
+                        WIN.fill((255, 255, 255))
+                        print_UI(size, grid)
+                        run = False
+        if not program:
+            break
 
 
-
-
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-    # exec(open("old_alg.py").read())
